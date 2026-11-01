@@ -11,6 +11,7 @@ Standard library only, so the GitHub Action needs no pip install.
 import argparse
 import json
 import math
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -158,6 +159,69 @@ def to_record(f):
     }
 
 
+def sev_of_text(t):
+    t = t.lower()
+    if re.search(r"\bfull (road )?closure\b", t):
+        return 3
+    if "lane closure" in t:
+        return 2
+    return 1
+
+
+def match_records(text, records):
+    """Match an HDOT text item to feed records by route + milepost overlap."""
+    rm = re.search(r"\(Routes?\s+(\d+)", text, re.I) or re.search(r"Route\s+(\d+)", text, re.I)
+    mm = re.search(r"mile\s*post\s+([\d.]+)\s*(?:to|-|–|and)\s*([\d.]+)", text, re.I)
+    if not rm or not mm:
+        return []
+    a, b = sorted((float(mm.group(1)), float(mm.group(2))))
+
+    def near(r):
+        if r["bmp"] is None or r["emp"] is None:
+            return False
+        lo, hi = sorted((r["bmp"], r["emp"]))
+        return min(b, hi) - max(a, lo) >= 0.5 * min((b - a) or 0.1, (hi - lo) or 0.1)
+
+    def pick(routes):
+        return [r for r in records if r["route"] in routes and r["line"] and near(r)]
+
+    hit = pick([rm.group(1)])
+    sister = {"56": "560", "560": "56"}.get(rm.group(1))
+    if not hit and sister:
+        hit = pick([sister])
+    return hit
+
+
+def build_summary(records, weekly, now_ms):
+    """Small file for the kauaiconnect.com homepage tile: closures grouped like the traffic page."""
+    for r in records:
+        r["_sev"] = 3 if (r["side"] == "Full" or r["fact"] == "Full") else (2 if r["fact"] == "Lane" else 1)
+    if weekly:
+        over = {}
+        for g in weekly["groups"]:
+            for i in g["items"]:
+                text = "".join(s["t"] for s in i["segs"])
+                for r in match_records(text, records):
+                    over[r["id"]] = max(over.get(r["id"], 0), sev_of_text(text))
+        for r in records:
+            if r["id"] in over:
+                r["_sev"] = over[r["id"]]
+    groups = {}
+    horizon = now_ms + 8 * 86400000
+    for r in records:
+        if r["end"] < now_ms - 3600000 or r["start"] > horizon:
+            continue
+        key = (r["route"], r["bmp"], r["emp"], r["fact"], r["side"], r["type"], r["reason"], r["hours"])
+        g = groups.setdefault(key, {"road": r["road"], "town": r["town"], "route": r["route"], "sev": r["_sev"], "occ": []})
+        g["sev"] = max(g["sev"], r["_sev"])
+        g["occ"].append([r["start"], r["end"]])
+    out = []
+    for g in groups.values():
+        g["occ"].sort()
+        out.append(g)
+    return {"generated": now_ms, "groups": out}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fixture", help="JSON file with an ArcGIS 'features' list (skips the network)")
@@ -195,6 +259,8 @@ def main():
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
+    summary = build_summary(records, weekly, int(now_utc.timestamp() * 1000))
+    (out.parent / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {out} ({len(records)} closure records, {len(html)//1024} KB) at {now_utc.astimezone(HST):%Y-%m-%d %H:%M} HST")
 
 
