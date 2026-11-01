@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from weekly import fetch_weekly, parse_weekly
+
 HERE = Path(__file__).parent
 SERVICE = (
     "https://services.arcgis.com/HQ0xoN0EzDPBOEci/arcgis/rest/services/"
@@ -159,6 +161,7 @@ def to_record(f):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fixture", help="JSON file with an ArcGIS 'features' list (skips the network)")
+    ap.add_argument("--weekly-fixture", help="saved HDOT Kauaʻi page HTML (offline test)")
     ap.add_argument("--out", default=str(HERE / "dist" / "index.html"))
     args = ap.parse_args()
 
@@ -172,8 +175,16 @@ def main():
     if not feats and not args.fixture:
         print("warning: feed returned 0 features", file=sys.stderr)
 
+    if args.weekly_fixture:
+        weekly = parse_weekly(Path(args.weekly_fixture).read_text(encoding="utf-8"))
+    elif args.fixture:
+        weekly = None
+    else:
+        weekly = fetch_weekly()
+
     payload = {
         "generated": int(now_utc.timestamp() * 1000),
+        "weekly": weekly,
         "horizonDays": HORIZON_DAYS,
         "records": records,
         "regions": {"north": "North", "east": "East", "south": "South", "west": "West"},
