@@ -39,7 +39,7 @@ details ul{margin:6px 0 0;padding-left:18px}
 .note{color:var(--muted);font-size:.84rem;margin-top:6px}
 .showmap{border:0;background:none;color:#0b5cab;cursor:pointer;font:inherit;font-size:.85rem;padding:0;white-space:nowrap}
 .empty{padding:14px;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
-.weekly h3{font-size:1rem;margin:16px 0 4px}.weekly .item{border-left:4px solid var(--line);padding:2px 0 2px 10px;margin:8px 0}.weekly .area{font-weight:600}
+.weekly h3{font-size:1rem;margin:16px 0 4px}.weekly .item{border-left:4px solid var(--line);padding:2px 0 2px 10px;margin:8px 0}.weekly .area{font-weight:600}.weekly .item{border-left-width:6px}.weekly .item.sev3{border-left-color:var(--full)}.weekly .item.sev2{border-left-color:var(--lane)}.weekly .item.sev1{border-left-color:var(--shoulder)}.weekly .item .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:2px}#focusbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:#faf6df;border:1px solid #efe3a0;border-radius:10px;padding:6px 12px;margin:8px 0;font-size:.9rem}#focusbar button{border:1px solid #d9b92a;background:var(--accent);border-radius:999px;padding:3px 12px;font:inherit;font-size:.85rem;cursor:pointer}
 .scope{background:#f4f6f8;border-radius:10px;padding:10px 12px;font-size:.88rem;color:#333;margin:12px 0}
 a{color:#0b5cab}
 @media (max-width:560px){#map{height:280px}}
@@ -52,6 +52,7 @@ a{color:#0b5cab}
 
   <div class="summary" id="summary"></div>
   <div class="filters" id="filters" role="group" aria-label="Filter by region"></div>
+  <div id="focusbar" hidden></div>
 
   <div id="map" role="region" aria-label="Map of closures"></div>
   <div class="legend">
@@ -135,6 +136,7 @@ map.forEach(g => {
 groups.sort((a,b) => (b.sev - a.sev) || (a.first.start - b.first.start));
 
 let region = 'all';
+let focusIds = null, focusLabel = '';
 let lmap, layerById = {};
 
 function renderFilters(){
@@ -156,7 +158,7 @@ function cardHtml(g){
   return `<article class="card sev${g.sev}" id="c${g.first.id}">
     <div class="top"><div><h3>${esc(r.road)}${rt}</h3>
       <div class="where">${r.town ? 'Near ' + esc(r.town) : ''}${mp}</div></div>
-      ${r.line.length ? `<button class="showmap" data-id="${g.first.id}">Show on map</button>` : ''}</div>
+      ${r.line.length ? `<button class="showmap" type="button" data-focus="${g.first.id}" data-label="${esc(r.road)}${r.town ? ' · near ' + esc(r.town) : ''}">Show on map</button>` : ''}</div>
     <div class="when">${when}</div>
     <div class="chips"><span class="chip s${g.sev}">${esc(sevLabel)}</span>
       ${r.type ? `<span class="chip">${esc(r.type)}</span>` : ''}
@@ -183,14 +185,12 @@ function render(){
     (full ? `<div class="stat" style="background:#fde4e4;border-color:#f3b4b4"><b>${full}</b>full closure${full>1?'s':''}</div>` : '');
   document.getElementById('asof').textContent =
     'Data pulled ' + new Intl.DateTimeFormat('en-US', {timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(D.generated) + ' HST';
+  const fb = document.getElementById('focusbar');
+  if (focusIds) {
+    fb.hidden = false;
+    fb.innerHTML = `<span>Map showing only: <b>${esc(focusLabel)}</b></span><button type="button">Show all closures</button>`;
+  } else { fb.hidden = true; }
   drawMap(vis);
-  document.querySelectorAll('.showmap').forEach(b => b.onclick = () => {
-    const l = layerById[b.dataset.id];
-    if (!l) return;
-    document.getElementById('map').scrollIntoView({behavior: 'smooth', block: 'center'});
-    lmap.fitBounds(l.getBounds().pad(1.2), {maxZoom: 15});
-    l.openPopup();
-  });
   postHeight();
 }
 
@@ -203,6 +203,7 @@ function drawMap(vis){
   lmap.layers.clearLayers(); layerById = {};
   vis.forEach(g => {
     if (!g.r.line.length) return;
+    if (focusIds && !focusIds.has(g.first.id)) return;
     const l = L.polyline(g.r.line, {color: COLORS[g.sev], weight: 7, opacity: .9});
     l.bindPopup(`<b>${esc(g.r.road)}</b><br>${g.r.town ? 'Near ' + esc(g.r.town) + '<br>' : ''}${g.active ? 'Active now' : (g.isToday ? 'Today' : fmtDay(g.first.start))}, ${fmtRange(g.first)}`);
     l.addTo(lmap.layers);
@@ -214,8 +215,12 @@ function drawMap(vis){
   });
   setTimeout(() => {
     lmap.invalidateSize();
-    if (lmap.layers.getLayers().length) lmap.fitBounds(lmap.layers.getBounds().pad(0.3), {maxZoom: 13});
+    if (lmap.layers.getLayers().length) lmap.fitBounds(lmap.layers.getBounds().pad(focusIds ? 1.0 : 0.3), {maxZoom: focusIds ? 15 : 13});
     else lmap.fitBounds([[21.85, -159.8], [22.25, -159.28]]);
+    if (focusIds) {
+      const first = [...focusIds].find(id => layerById[id]);
+      if (first) layerById[first].openPopup();
+    }
   }, 0);
 }
 
@@ -234,6 +239,51 @@ function segsHtml(segs){
     return esc(s.t);
   }).join('');
 }
+const SEV_LABEL = {3: 'Full closure', 2: 'Lane closure', 1: 'Shoulder / other'};
+function sevOfText(t){
+  t = t.toLowerCase();
+  if (/\bfull (road )?closure\b/.test(t)) return 3;
+  if (/lane closure/.test(t)) return 2;
+  return 1;
+}
+// Match an HDOT text item to the closures on the map by route + milepost overlap.
+function matchIds(t){
+  const rm = t.match(/\(Routes?\s+(\d+)/i) || t.match(/Route\s+(\d+)/i);
+  const mm = t.match(/mile\s*post\s+([\d.]+)\s*(?:to|-|–|and)\s*([\d.]+)/i);
+  if (!rm || !mm) return [];
+  const a = Math.min(+mm[1], +mm[2]), b = Math.max(+mm[1], +mm[2]);
+  const near = g => {
+    const lo = Math.min(g.r.bmp, g.r.emp), hi = Math.max(g.r.bmp, g.r.emp);
+    return Math.min(b, hi) - Math.max(a, lo) >= 0.5 * Math.min((b - a) || 0.1, (hi - lo) || 0.1);
+  };
+  const pick = routes => groups.filter(g => routes.includes(g.r.route) && g.r.bmp != null && g.r.emp != null && g.r.line.length && near(g));
+  const sister = {'56': '560', '560': '56'}[rm[1]];
+  let hit = pick([rm[1]]);
+  if (!hit.length && sister) hit = pick([sister]);
+  return [...new Set(hit.map(g => g.first.id))];
+}
+function weeklyItemHtml(i, title){
+  const t = i.segs.map(s => s.t).join('');
+  const sev = sevOfText(t), ids = matchIds(t);
+  const label = (i.area ? i.area + ' – ' : '') + title;
+  return `<div class="item sev${sev}"><div class="top"><div>${i.area ? `<span class="area">${esc(i.area)}</span> ` : ''}<span class="chip s${sev}">${SEV_LABEL[sev]}</span></div>` +
+    (ids.length ? `<button class="showmap" type="button" data-focus="${ids.join(',')}" data-label="${esc(label)}">Show on map</button>` : '') +
+    `</div><div>${segsHtml(i.segs)}</div></div>`;
+}
+function focusClosures(ids, label){
+  focusIds = new Set(ids);
+  focusLabel = label || '';
+  region = 'all';
+  render();
+  document.getElementById('map').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-focus]');
+  if (b) focusClosures(b.dataset.focus.split(',').map(Number), b.dataset.label);
+});
+document.getElementById('focusbar').addEventListener('click', e => {
+  if (e.target.closest('button')) { focusIds = null; render(); }
+});
 function renderWeekly(){
   const W = D.weekly;
   if (!W) { document.getElementById('weekly-missing').hidden = false; return; }
@@ -242,9 +292,7 @@ function renderWeekly(){
   const nb = document.getElementById('weekly-note');
   if (W.note) nb.innerHTML = '<b>Please note:</b> ' + segsHtml(W.note); else nb.hidden = true;
   document.getElementById('weekly-body').innerHTML = W.groups.map(g =>
-    `<h3>${esc(g.title)}</h3>` + g.items.map(i =>
-      `<div class="item">${i.area ? `<div class="area">${esc(i.area)}</div>` : ''}<div>${segsHtml(i.segs)}</div></div>`
-    ).join('')
+    `<h3>${esc(g.title)}</h3>` + g.items.map(i => weeklyItemHtml(i, g.title)).join('')
   ).join('');
   postHeight();
 }
