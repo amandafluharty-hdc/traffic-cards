@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kauaʻi Road Closures</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--ink:#1c1c1c;--muted:#5d6670;--line:#e3e6ea;--bg:#fff;--card:#fff;--accent:#f6d44a;--full:#c62828;--lane:#e08a00;--shoulder:#5b7083}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+.wrap{max-width:1000px;margin:0 auto;padding:12px 14px 28px}
+h1{font-size:1.5rem;margin:.2rem 0 .1rem}
+h2{font-size:1.15rem;margin:1.6rem 0 .6rem}
+.sub{color:var(--muted);font-size:.9rem;margin:0}
+.summary{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.stat{background:#faf6df;border:1px solid #efe3a0;border-radius:10px;padding:8px 12px;font-size:.9rem}
+.stat b{font-size:1.2rem;display:block;line-height:1.1}
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.filters button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;font:inherit;font-size:.9rem;cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--accent);border-color:#d9b92a;font-weight:600}
+#map{height:340px;border-radius:12px;border:1px solid var(--line);margin:8px 0;z-index:0}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.82rem;color:var(--muted);margin:2px 0 6px}
+.legend i{display:inline-block;width:22px;height:5px;border-radius:3px;vertical-align:middle;margin-right:5px}
+.cards{display:grid;gap:10px}
+.card{border:1px solid var(--line);border-left:6px solid var(--shoulder);border-radius:10px;padding:10px 12px;background:var(--card)}
+.card.sev3{border-left-color:var(--full)}.card.sev2{border-left-color:var(--lane)}.card.sev1{border-left-color:var(--shoulder)}
+.card .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.card h3{margin:0;font-size:1.02rem}
+.where{color:var(--muted);font-size:.88rem}
+.when{margin:6px 0 4px;font-weight:600}
+.now{display:inline-block;background:var(--full);color:#fff;border-radius:6px;padding:1px 7px;font-size:.75rem;margin-left:6px;vertical-align:middle}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
+.chip{font-size:.76rem;border-radius:6px;padding:2px 8px;background:#eef1f4;color:#333}
+.chip.s3{background:#fde4e4;color:#8e1b1b}.chip.s2{background:#fff0d6;color:#7a4a00}
+details{margin-top:6px;font-size:.88rem}
+summary{cursor:pointer;color:#0b5cab}
+details ul{margin:6px 0 0;padding-left:18px}
+.note{color:var(--muted);font-size:.84rem;margin-top:6px}
+.showmap{border:0;background:none;color:#0b5cab;cursor:pointer;font:inherit;font-size:.85rem;padding:0;white-space:nowrap}
+.empty{padding:14px;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
+.fallback iframe{width:100%;height:800px;border:1px solid var(--line);border-radius:10px}
+.scope{background:#f4f6f8;border-radius:10px;padding:10px 12px;font-size:.88rem;color:#333;margin:12px 0}
+a{color:#0b5cab}
+@media (max-width:560px){#map{height:280px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Kauaʻi Road Closures</h1>
+  <p class="sub" id="asof"></p>
+
+  <div class="summary" id="summary"></div>
+  <div class="filters" id="filters" role="group" aria-label="Filter by region"></div>
+
+  <div id="map" role="region" aria-label="Map of closures"></div>
+  <div class="legend">
+    <span><i style="background:var(--full)"></i>Full closure</span>
+    <span><i style="background:var(--lane)"></i>Lane closure</span>
+    <span><i style="background:var(--shoulder)"></i>Shoulder / other</span>
+  </div>
+
+  <h2 id="h-today">Today</h2>
+  <div class="cards" id="today"></div>
+  <h2 id="h-soon">Coming up this week</h2>
+  <div class="cards" id="soon"></div>
+
+  <div class="scope">
+    This list shows <b>planned</b> HDOT work on state highways. It does not include crashes, weather,
+    flooding or other emergency closures. Before you head out, check
+    <a href="https://hidot.hawaii.gov/highways/roadwork/kauai/" target="_blank" rel="noopener">HDOT’s Kauaʻi page</a>
+    and local news.
+  </div>
+
+  <section class="fallback">
+    <h2>Official HDOT listing</h2>
+    <p class="note" style="margin-top:0">The state’s own weekly list, in case anything above looks off.</p>
+    <iframe src="https://hidot.hawaii.gov/highways/roadwork/kauai/" loading="lazy" title="HDOT Kauaʻi lane closures"></iframe>
+  </section>
+
+  <p class="note">Source: Hawaiʻi Department of Transportation, Highways Division. Data updates when HDOT publishes (usually weekly, with changes during the week).</p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const D = /*__DATA__*/null;
+const TZ = 'Pacific/Honolulu';
+const qs = new URLSearchParams(location.search);
+// ?now=2026-11-01T10:30 lets you preview the page as of a given Hawaiʻi time.
+const NOW = qs.get('now') ? Date.parse(qs.get('now') + (/[zZ]|[+-]\d\d:?\d\d$/.test(qs.get('now')) ? '' : '-10:00')) : Date.now();
+
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const dayKey = ms => new Intl.DateTimeFormat('en-CA', {timeZone: TZ}).format(ms);
+const fmtDay = ms => new Intl.DateTimeFormat('en-US', {timeZone: TZ, weekday: 'short', month: 'numeric', day: 'numeric'}).format(ms);
+function fmtTime(ms){
+  let h='', m='', ap='';
+  new Intl.DateTimeFormat('en-US', {timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true}).formatToParts(ms)
+    .forEach(p => { if(p.type==='hour') h=p.value; if(p.type==='minute') m=p.value; if(p.type==='dayPeriod') ap=p.value.replace(/\./g,'').toUpperCase(); });
+  return h + (m==='00' ? '' : ':'+m) + ' ' + ap;
+}
+function fmtRange(o){
+  const a = fmtTime(o.start), b = fmtTime(o.end);
+  return dayKey(o.start) === dayKey(o.end) ? `${a} – ${b}` : `${a} – ${b} (${fmtDay(o.end)})`;
+}
+
+const today = dayKey(NOW);
+const daysAway = ms => Math.round((Date.parse(dayKey(ms)) - Date.parse(today)) / 86400000);
+const sevOf = r => (r.side === 'Full' || r.fact === 'Full') ? 3 : (r.fact === 'Lane' ? 2 : 1);
+const COLORS = {3:'#c62828', 2:'#e08a00', 1:'#5b7083'};
+
+// Group the per-day records into one card per closure location + type.
+const map = new Map();
+D.records.forEach(r => {
+  if (r.end < NOW) return;
+  const k = [r.route, r.bmp, r.emp, r.fact, r.side, r.type, r.reason, r.hours].join('|');
+  if (!map.has(k)) map.set(k, {key:k, occ:[], r});
+  map.get(k).occ.push(r);
+});
+const groups = [];
+map.forEach(g => {
+  g.occ.sort((a,b) => a.start - b.start);
+  const first = g.occ[0];
+  g.first = first;
+  g.active = first.start <= NOW;
+  g.isToday = g.active || dayKey(first.start) === today;
+  g.sev = sevOf(g.r);
+  g.remarks = g.occ.map(o => o.remarks).find(Boolean) || '';
+  if (!g.isToday && daysAway(first.start) > D.horizonDays) return;
+  groups.push(g);
+});
+groups.sort((a,b) => (b.sev - a.sev) || (a.first.start - b.first.start));
+
+let region = 'all';
+let lmap, layerById = {};
+
+function renderFilters(){
+  const el = document.getElementById('filters');
+  const opts = [['all','All Kauaʻi'], ...Object.entries(D.regions)];
+  el.innerHTML = opts.map(([k,v]) => `<button type="button" data-r="${k}" aria-pressed="${k===region}">${esc(v)}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.onclick = () => { region = b.dataset.r; render(); });
+}
+
+function cardHtml(g){
+  const r = g.r, f = g.first;
+  const sevLabel = g.sev === 3 ? 'Full closure' : (g.sev === 2 ? 'Lane closure' : (r.fact ? r.fact + ' closure' : 'Closure'));
+  const rt = r.route ? ` (Rt ${esc(r.route)})` : '';
+  const mp = (r.bmp != null && r.emp != null) ? ` · mile ${Math.min(r.bmp, r.emp).toFixed(1)}–${Math.max(r.bmp, r.emp).toFixed(1)}` : '';
+  const when = g.active ? `Now until ${fmtTime(f.end)}<span class="now">ACTIVE</span>`
+    : (g.isToday ? `Today ${fmtRange(f)}` : `${fmtDay(f.start)} ${fmtRange(f)}`);
+  const more = g.occ.length - 1;
+  const list = g.occ.map(o => `<li>${fmtDay(o.start)} · ${fmtRange(o)}</li>`).join('');
+  return `<article class="card sev${g.sev}" id="c${g.first.id}">
+    <div class="top"><div><h3>${esc(r.road)}${rt}</h3>
+      <div class="where">${r.town ? 'Near ' + esc(r.town) : ''}${mp}</div></div>
+      ${r.line.length ? `<button class="showmap" data-id="${g.first.id}">Show on map</button>` : ''}</div>
+    <div class="when">${when}</div>
+    <div class="chips"><span class="chip s${g.sev}">${esc(sevLabel)}</span>
+      ${r.type ? `<span class="chip">${esc(r.type)}</span>` : ''}
+      ${r.reason ? `<span class="chip">${esc(r.reason)}</span>` : ''}</div>
+    ${(more > 0 || g.remarks) ? `<details><summary>${more > 0 ? `${g.occ.length} scheduled days` : 'Details'}</summary>
+      ${more > 0 ? `<ul>${list}</ul>` : ''}
+      ${g.remarks ? `<p class="note">HDOT note: ${esc(g.remarks)}</p>` : ''}</details>` : ''}
+  </article>`;
+}
+
+function render(){
+  renderFilters();
+  const vis = groups.filter(g => region === 'all' || g.r.region === region);
+  const t = vis.filter(g => g.isToday), s = vis.filter(g => !g.isToday);
+  const regionName = region === 'all' ? 'on Kauaʻi' : 'in this region';
+  document.getElementById('today').innerHTML = t.length ? t.map(cardHtml).join('')
+    : `<div class="empty">No planned state-highway closures today ${regionName}.</div>`;
+  document.getElementById('soon').innerHTML = s.length ? s.map(cardHtml).join('')
+    : `<div class="empty">Nothing else scheduled in the next ${D.horizonDays} days ${regionName}.</div>`;
+  const full = vis.filter(g => g.sev === 3).length;
+  document.getElementById('summary').innerHTML =
+    `<div class="stat"><b>${t.length}</b>today</div>` +
+    `<div class="stat"><b>${s.length}</b>coming up</div>` +
+    (full ? `<div class="stat" style="background:#fde4e4;border-color:#f3b4b4"><b>${full}</b>full closure${full>1?'s':''}</div>` : '');
+  document.getElementById('asof').textContent =
+    'Data pulled ' + new Intl.DateTimeFormat('en-US', {timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(D.generated) + ' HST';
+  drawMap(vis);
+  document.querySelectorAll('.showmap').forEach(b => b.onclick = () => {
+    const l = layerById[b.dataset.id];
+    if (!l) return;
+    document.getElementById('map').scrollIntoView({behavior: 'smooth', block: 'center'});
+    lmap.fitBounds(l.getBounds().pad(1.2), {maxZoom: 15});
+    l.openPopup();
+  });
+  postHeight();
+}
+
+function drawMap(vis){
+  if (!lmap) {
+    lmap = L.map('map', {scrollWheelZoom: false}).setView([22.04, -159.5], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 18, attribution: '© OpenStreetMap contributors'}).addTo(lmap);
+    lmap.layers = L.featureGroup().addTo(lmap);
+  }
+  lmap.layers.clearLayers(); layerById = {};
+  vis.forEach(g => {
+    if (!g.r.line.length) return;
+    const l = L.polyline(g.r.line, {color: COLORS[g.sev], weight: 7, opacity: .9});
+    l.bindPopup(`<b>${esc(g.r.road)}</b><br>${g.r.town ? 'Near ' + esc(g.r.town) + '<br>' : ''}${g.active ? 'Active now' : (g.isToday ? 'Today' : fmtDay(g.first.start))}, ${fmtRange(g.first)}`);
+    l.addTo(lmap.layers);
+    layerById[g.first.id] = l;
+    // A dot at the midpoint so short closures are visible at island zoom.
+    const pts = g.r.line[0], mid = pts[Math.floor(pts.length / 2)];
+    L.circleMarker(mid, {radius: 8, color: '#fff', weight: 2, fillColor: COLORS[g.sev], fillOpacity: 1})
+      .bindPopup(l.getPopup().getContent()).addTo(lmap.layers);
+  });
+  setTimeout(() => {
+    lmap.invalidateSize();
+    if (lmap.layers.getLayers().length) lmap.fitBounds(lmap.layers.getBounds().pad(0.3), {maxZoom: 13});
+    else lmap.fitBounds([[21.85, -159.8], [22.25, -159.28]]);
+  }, 0);
+}
+
+function postHeight(){
+  try { parent.postMessage({kcTrafficHeight: document.documentElement.scrollHeight}, '*'); } catch(e) {}
+}
+window.addEventListener('resize', postHeight);
+window.addEventListener('load', postHeight);
+render();
+</script>
+</body>
+</html>
