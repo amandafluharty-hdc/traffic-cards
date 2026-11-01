@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 :root{--ink:#1c1c1c;--muted:#5d6670;--line:#e3e6ea;--bg:#fff;--card:#fff;--accent:#f6d44a;--full:#c62828;--lane:#e08a00;--shoulder:#5b7083}
-*{box-sizing:border-box}
+*{box-sizing:border-box}[hidden]{display:none!important}
 body{margin:0;font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
 .wrap{max-width:1000px;margin:0 auto;padding:12px 14px 28px}
 h1{font-size:1.5rem;margin:.2rem 0 .1rem}
@@ -169,54 +169,71 @@ function cardHtml(g){
   </article>`;
 }
 
-function render(){
+function render(refit = true){
   renderFilters();
   const vis = groups.filter(g => region === 'all' || g.r.region === region);
-  const t = vis.filter(g => g.isToday), s = vis.filter(g => !g.isToday);
+  const tAll = vis.filter(g => g.isToday), sAll = vis.filter(g => !g.isToday);
+  const sel = focusIds ? vis.filter(g => focusIds.has(g.first.id)) : vis;
+  const t = sel.filter(g => g.isToday), s = sel.filter(g => !g.isToday);
   const regionName = region === 'all' ? 'on Kauaʻi' : 'in this region';
+  document.getElementById('h-today').hidden = document.getElementById('today').hidden = !!focusIds && !t.length;
+  document.getElementById('h-soon').hidden = document.getElementById('soon').hidden = !!focusIds && !s.length;
   document.getElementById('today').innerHTML = t.length ? t.map(cardHtml).join('')
     : `<div class="empty">No planned state-highway closures today ${regionName}.</div>`;
   document.getElementById('soon').innerHTML = s.length ? s.map(cardHtml).join('')
     : `<div class="empty">Nothing else scheduled in the next ${D.horizonDays} days ${regionName}.</div>`;
   const full = vis.filter(g => g.sev === 3).length;
   document.getElementById('summary').innerHTML =
-    `<div class="stat"><b>${t.length}</b>today</div>` +
-    `<div class="stat"><b>${s.length}</b>coming up</div>` +
+    `<div class="stat"><b>${tAll.length}</b>today</div>` +
+    `<div class="stat"><b>${sAll.length}</b>coming up</div>` +
     (full ? `<div class="stat" style="background:#fde4e4;border-color:#f3b4b4"><b>${full}</b>full closure${full>1?'s':''}</div>` : '');
   document.getElementById('asof').textContent =
     'Data pulled ' + new Intl.DateTimeFormat('en-US', {timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(D.generated) + ' HST';
   const fb = document.getElementById('focusbar');
   if (focusIds) {
     fb.hidden = false;
-    fb.innerHTML = `<span>Map showing only: <b>${esc(focusLabel)}</b></span><button type="button">Show all closures</button>`;
+    fb.innerHTML = `<span>Showing only: <b>${esc(focusLabel)}</b> <span class="note">(cards and HDOT list below are filtered)</span></span><button type="button">Show all closures</button>`;
   } else { fb.hidden = true; }
-  drawMap(vis);
+  drawMap(vis, refit);
+  renderWeekly();
   postHeight();
 }
 
-function drawMap(vis){
+function drawMap(vis, refit){
   if (!lmap) {
     lmap = L.map('map', {scrollWheelZoom: false}).setView([22.04, -159.5], 10);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 18, attribution: '© OpenStreetMap contributors'}).addTo(lmap);
     lmap.layers = L.featureGroup().addTo(lmap);
+    lmap.on('click', () => clearSelection(false));
   }
   lmap.layers.clearLayers(); layerById = {};
+  const dots = [];
   vis.forEach(g => {
     if (!g.r.line.length) return;
-    if (focusIds && !focusIds.has(g.first.id)) return;
-    const l = L.polyline(g.r.line, {color: COLORS[g.sev], weight: 7, opacity: .9});
+    const chosen = !!focusIds && focusIds.has(g.first.id), dim = !!focusIds && !chosen;
+    const label = g.r.road + (g.r.town ? ' · near ' + g.r.town : '');
+    const pick = () => selectClosures([g.first.id], label, false);
+    const l = L.polyline(g.r.line, {color: COLORS[g.sev], weight: chosen ? 9 : 7, opacity: dim ? .3 : .9, bubblingMouseEvents: false});
+    l.on('click', pick);
     l.bindPopup(`<b>${esc(g.r.road)}</b><br>${g.r.town ? 'Near ' + esc(g.r.town) + '<br>' : ''}${g.active ? 'Active now' : (g.isToday ? 'Today' : fmtDay(g.first.start))}, ${fmtRange(g.first)}`);
     l.addTo(lmap.layers);
     layerById[g.first.id] = l;
     // A dot at the midpoint so short closures are visible at island zoom.
     const pts = g.r.line[0], mid = pts[Math.floor(pts.length / 2)];
-    L.circleMarker(mid, {radius: 8, color: '#fff', weight: 2, fillColor: COLORS[g.sev], fillOpacity: 1})
-      .bindPopup(l.getPopup().getContent()).addTo(lmap.layers);
+    const m = L.circleMarker(mid, {radius: chosen ? 11 : 8, color: chosen ? '#111' : '#fff', weight: chosen ? 3 : 2, fillColor: COLORS[g.sev], fillOpacity: dim ? .35 : 1, bubblingMouseEvents: false})
+      .bindPopup(l.getPopup().getContent()).on('click', pick);
+    dots.push([g.sev, chosen ? 1 : 0, m]);
   });
+  // Dots go on top of every line; the selected one on top of all, then most severe first.
+  dots.sort((a, b) => (a[1] - b[1]) || (a[0] - b[0])).forEach(d => d[2].addTo(lmap.layers));
   setTimeout(() => {
     lmap.invalidateSize();
-    if (lmap.layers.getLayers().length) lmap.fitBounds(lmap.layers.getBounds().pad(focusIds ? 1.0 : 0.3), {maxZoom: focusIds ? 15 : 13});
-    else lmap.fitBounds([[21.85, -159.8], [22.25, -159.28]]);
+    if (refit) {
+      const chosenLayers = focusIds ? [...focusIds].map(id => layerById[id]).filter(Boolean) : [];
+      if (chosenLayers.length) lmap.fitBounds(L.featureGroup(chosenLayers).getBounds().pad(1.0), {maxZoom: 15});
+      else if (lmap.layers.getLayers().length) lmap.fitBounds(lmap.layers.getBounds().pad(0.3), {maxZoom: 13});
+      else lmap.fitBounds([[21.85, -159.8], [22.25, -159.28]]);
+    }
     if (focusIds) {
       const first = [...focusIds].find(id => layerById[id]);
       if (first) layerById[first].openPopup();
@@ -270,19 +287,24 @@ function weeklyItemHtml(i, title){
     (ids.length ? `<button class="showmap" type="button" data-focus="${ids.join(',')}" data-label="${esc(label)}">Show on map</button>` : '') +
     `</div><div>${segsHtml(i.segs)}</div></div>`;
 }
-function focusClosures(ids, label){
+function selectClosures(ids, label, fromList){
   focusIds = new Set(ids);
   focusLabel = label || '';
-  region = 'all';
-  render();
-  document.getElementById('map').scrollIntoView({behavior: 'smooth', block: 'center'});
+  if (fromList) region = 'all';
+  render(!!fromList);
+  if (fromList) document.getElementById('map').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+function clearSelection(refit){
+  if (!focusIds) return;
+  focusIds = null;
+  render(!!refit);
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-focus]');
-  if (b) focusClosures(b.dataset.focus.split(',').map(Number), b.dataset.label);
+  if (b) selectClosures(b.dataset.focus.split(',').map(Number), b.dataset.label, true);
 });
 document.getElementById('focusbar').addEventListener('click', e => {
-  if (e.target.closest('button')) { focusIds = null; render(); }
+  if (e.target.closest('button')) clearSelection(true);
 });
 function renderWeekly(){
   const W = D.weekly;
@@ -291,13 +313,14 @@ function renderWeekly(){
   document.getElementById('weekly-week').textContent = W.week || '';
   const nb = document.getElementById('weekly-note');
   if (W.note) nb.innerHTML = '<b>Please note:</b> ' + segsHtml(W.note); else nb.hidden = true;
-  document.getElementById('weekly-body').innerHTML = W.groups.map(g =>
-    `<h3>${esc(g.title)}</h3>` + g.items.map(i => weeklyItemHtml(i, g.title)).join('')
-  ).join('');
+  const rows = W.groups.map(g => {
+    const items = g.items.filter(i => !focusIds || matchIds(i.segs.map(s => s.t).join('')).some(id => focusIds.has(id)));
+    return items.length ? `<h3>${esc(g.title)}</h3>` + items.map(i => weeklyItemHtml(i, g.title)).join('') : '';
+  }).join('');
+  document.getElementById('weekly-body').innerHTML = rows || '<div class="empty">HDOT’s weekly list has no matching entry for this closure.</div>';
   postHeight();
 }
 render();
-renderWeekly();
 </script>
 </body>
 </html>
