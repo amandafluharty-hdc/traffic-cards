@@ -39,7 +39,7 @@ details ul{margin:6px 0 0;padding-left:18px}
 .note{color:var(--muted);font-size:.84rem;margin-top:6px}
 .showmap{border:0;background:none;color:#0b5cab;cursor:pointer;font:inherit;font-size:.85rem;padding:0;white-space:nowrap}
 .empty{padding:14px;border:1px dashed var(--line);border-radius:10px;color:var(--muted)}
-.fallback iframe{width:100%;height:800px;border:1px solid var(--line);border-radius:10px}
+.weekly h3{font-size:1rem;margin:16px 0 4px}.weekly .item{border-left:4px solid var(--line);padding:2px 0 2px 10px;margin:8px 0}.weekly .area{font-weight:600}
 .scope{background:#f4f6f8;border-radius:10px;padding:10px 12px;font-size:.88rem;color:#333;margin:12px 0}
 a{color:#0b5cab}
 @media (max-width:560px){#map{height:280px}}
@@ -72,11 +72,15 @@ a{color:#0b5cab}
     and local news.
   </div>
 
-  <section class="fallback">
-    <h2>Official HDOT listing</h2>
-    <p class="note" style="margin-top:0">The state’s own weekly list, in case anything above looks off.</p>
-    <iframe src="https://hidot.hawaii.gov/highways/roadwork/kauai/" loading="lazy" title="HDOT Kauaʻi lane closures"></iframe>
+  <section class="weekly" id="weekly" hidden>
+    <h2>HDOT’s weekly list for Kauaʻi</h2>
+    <p class="note" id="weekly-week" style="margin-top:0"></p>
+    <div id="weekly-note" class="scope"></div>
+    <div id="weekly-body"></div>
+    <p class="note">Copied from <a href="https://hidot.hawaii.gov/highways/roadwork/kauai/" target="_blank" rel="noopener">HDOT’s Kauaʻi lane closures page</a>, the official source.</p>
   </section>
+  <p class="note" id="weekly-missing" hidden>HDOT’s weekly list couldn’t be loaded just now. See
+    <a href="https://hidot.hawaii.gov/highways/roadwork/kauai/" target="_blank" rel="noopener">HDOT’s Kauaʻi page</a>.</p>
 
   <p class="note">Source: Hawaiʻi Department of Transportation, Highways Division. Data updates when HDOT publishes (usually weekly, with changes during the week).</p>
 </div>
@@ -221,7 +225,31 @@ function postHeight(){
 window.addEventListener('resize', postHeight);
 window.addEventListener('load', postHeight);
 if (window.ResizeObserver) new ResizeObserver(postHeight).observe(document.querySelector('.wrap'));
+function segsHtml(segs){
+  return (segs || []).map(s => {
+    if (s.href && /^https:\/\//.test(s.href)) {
+      const label = /^https?:/.test(s.t) ? 'HDOT post' : s.t;
+      return `<a href="${esc(s.href)}" target="_blank" rel="noopener">${esc(label)}</a>`;
+    }
+    return esc(s.t);
+  }).join('');
+}
+function renderWeekly(){
+  const W = D.weekly;
+  if (!W) { document.getElementById('weekly-missing').hidden = false; return; }
+  document.getElementById('weekly').hidden = false;
+  document.getElementById('weekly-week').textContent = W.week || '';
+  const nb = document.getElementById('weekly-note');
+  if (W.note) nb.innerHTML = '<b>Please note:</b> ' + segsHtml(W.note); else nb.hidden = true;
+  document.getElementById('weekly-body').innerHTML = W.groups.map(g =>
+    `<h3>${esc(g.title)}</h3>` + g.items.map(i =>
+      `<div class="item">${i.area ? `<div class="area">${esc(i.area)}</div>` : ''}<div>${segsHtml(i.segs)}</div></div>`
+    ).join('')
+  ).join('');
+  postHeight();
+}
 render();
+renderWeekly();
 </script>
 </body>
 </html>
