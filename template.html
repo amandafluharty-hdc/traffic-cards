@@ -320,6 +320,17 @@ function renderWeekly(){
   document.getElementById('weekly-body').innerHTML = rows || '<div class="empty">HDOT’s weekly list has no matching entry for this closure.</div>';
   postHeight();
 }
+// HDOT's written list is the authority on severity: where an item matches a closure, use its wording.
+(function(){
+  if (!D.weekly) return;
+  const over = new Map();
+  D.weekly.groups.forEach(g => g.items.forEach(i => {
+    const t = i.segs.map(s => s.t).join(''), sev = sevOfText(t);
+    matchIds(t).forEach(id => over.set(id, Math.max(over.get(id) || 0, sev)));
+  }));
+  groups.forEach(g => { if (over.has(g.first.id)) g.sev = over.get(g.first.id); });
+  groups.sort((a, b) => (b.sev - a.sev) || (a.first.start - b.first.start));
+})();
 render();
 </script>
 </body>
