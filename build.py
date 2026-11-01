@@ -57,8 +57,8 @@ TOWNS = {
     "Moloaʻa": (22.1250, -159.3330, "east"),
     "Kapaʻa": (22.0753, -159.3190, "east"),
     "Wailua": (22.0467, -159.3370, "east"),
-    "Hanamāʻulu": (21.9906, -159.3480, "east"),
-    "Līhuʻe": (21.9811, -159.3711, "east"),
+    "Hanamāʻulu": (21.9906, -159.3480, "lihue"),
+    "Līhuʻe": (21.9811, -159.3711, "lihue"),
     "Kōloa": (21.9064, -159.4694, "south"),
     "Poʻipū": (21.8767, -159.4586, "south"),
     "Lāwaʻi": (21.9275, -159.5011, "south"),
@@ -187,7 +187,7 @@ def main():
         "weekly": weekly,
         "horizonDays": HORIZON_DAYS,
         "records": records,
-        "regions": {"north": "North", "east": "East", "south": "South", "west": "West"},
+        "regions": {"north": "North", "east": "East", "lihue": "Līhuʻe", "south": "South", "west": "West"},
     }
     data_js = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = (HERE / "template.html").read_text().replace("/*__DATA__*/null", data_js)
