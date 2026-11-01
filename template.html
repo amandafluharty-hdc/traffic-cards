@@ -216,10 +216,11 @@ function drawMap(vis){
 }
 
 function postHeight(){
-  try { parent.postMessage({kcTrafficHeight: document.documentElement.scrollHeight}, '*'); } catch(e) {}
+  try { parent.postMessage({kcTrafficHeight: (document.querySelector('.wrap').offsetHeight + 24)}, '*'); } catch(e) {}
 }
 window.addEventListener('resize', postHeight);
 window.addEventListener('load', postHeight);
+if (window.ResizeObserver) new ResizeObserver(postHeight).observe(document.querySelector('.wrap'));
 render();
 </script>
 </body>
